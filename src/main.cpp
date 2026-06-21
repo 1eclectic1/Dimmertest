@@ -286,11 +286,21 @@ void loop() {
   // Non-Blocking Connection Verification Timer
   if (now - t3old >= t3interval) {
     t3old = now;
-    if (WiFi.status() == WL_CONNECTED && !client.connected()) {
+    
+    // 1. If WiFi itself dropped out, proactively trigger recovery
+    if (WiFi.status() != WL_CONNECTED) {
+      LOG_INFO("WiFi disconnected! Running recovery...");
+      JVWIFISetUp(); 
+    } 
+    // 2. If WiFi is fine but MQTT broke, reconnect to broker
+    else if (!client.connected()) {
       LOG_INFO("MQTT Disconnected. Attempting non-blocking reconnect...");
       reconnect();
     }
   }
 
-  yield(); 
+  // Allow ezTime to process NTP background updates so the clock never drifts
+  events(); 
+
+  yield();
 }
