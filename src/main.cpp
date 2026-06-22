@@ -8,6 +8,7 @@
 #include <jvcommon.h>
 #include <cctype>
 #include <cmath> // Exponential math core
+#include "config.h" // Include the new config file
 
 String version = "1.0.4-scaled90";
 
@@ -53,6 +54,11 @@ void writeHardwarePWM(int ch, int rawLinearDuty) {
   int maxLimit = MAX_LIMITS[ch];
   int scaledPerceptualDuty = 0;
 
+#if MAX_LIMITS_ZERO_MEANS_OFF
+  if (maxLimit == 0) { // If channel is explicitly disabled, force off.
+    scaledPerceptualDuty = 0;
+  } else
+#endif
   if (rawLinearDuty > 0 && maxLimit > 0) {
     float normalized = (float)rawLinearDuty / (float)maxLimit;
     // Exponential power warp for visual perception (active for fast and slow dimming)
@@ -86,6 +92,11 @@ void pubstats(bool forceRetain) {
     snprintf(key, sizeof(key), "FTD%d", i);
     
     int currentPercent = 0;
+#if MAX_LIMITS_ZERO_MEANS_OFF
+    if (MAX_LIMITS[i] == 0) { // If channel is explicitly disabled, report 0%.
+      currentPercent = 0;
+    } else
+#endif
     if (MAX_LIMITS[i] > 0) {
       currentPercent = (int)round(((float)dimmer[i].currentDuty / (float)MAX_LIMITS[i]) * 100.0);
     }

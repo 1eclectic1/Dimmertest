@@ -146,6 +146,10 @@ void runJvFSManager();
 // Forward declaration for sensor-specific function
 void ReadSensorInformation();
 
+#ifndef OUTDOOR_TIMEOUT
+#define OUTDOOR_TIMEOUT 300000 // 5 minutes, in milliseconds
+#endif
+
 // Forward declarations
 #ifdef BAT
 void readbat();
@@ -156,11 +160,16 @@ extern uint16_t batt;
 #ifdef BME
 void readbme();
 extern double bmetemp, bmehum, bmepres, bmedew, bmehi;
+const double ALTITUDE_M = 118.3; // Default altitude for sea level pressure calculation
+const double LAPSE_RATE = 0.0065; // Standard atmospheric lapse rate
+const double INHG_CONVERSION_FACTOR = 3386.39; // Pa to inHg conversion
 #endif
 
 #ifdef BMP
 void readbmp();
 extern double bmptemp, bmppres;
+const double BMP_ALTITUDE_M = 110.0; // Default altitude for BMP sea level pressure calculation
+const double BMP_INHG_CONVERSION_FACTOR = 3386.0; // Pa to inHg conversion for BMP
 #endif
 
 #ifdef DHTPIN
@@ -526,7 +535,8 @@ void mysetup() {
 #if OW_PIN3 >= 0
   sensorsBus3.requestTemperatures();
 #endif
-  delay(2500);
+
+  // Removed delay(2500) - subsequent readBus calls and readAllBuses provide sufficient delay.
 
 #if OW_PIN1 >= 0
   readBus(sensorsBus1, addrBus1, tempBus1, numSensorsBus1, 1);
@@ -578,8 +588,10 @@ void readbme() {
   bmetemp = sensor_temperatureC * 1.8 + 32;            // for display
 
   // ==================== Sea Level Pressure Calculation ====================
-  double altitude_m = 118.3;  // GPS elevation in meters
-  double lapse_rate = 0.0065;
+
+
+  double altitude_m = ALTITUDE_M;  // GPS elevation in meters
+  double lapse_rate = LAPSE_RATE;
   double altadj = lapse_rate * altitude_m;
 
   double column_tempC;
@@ -598,7 +610,8 @@ void readbme() {
   double station_Pa = bme.readPressure();
   double sl_Pa = station_Pa * pow((1.0 - (altadj / T_K)), -5.257);
 
-  bmepres = sl_Pa / 3386.39;  // Convert to inHg
+
+  bmepres = sl_Pa / INHG_CONVERSION_FACTOR;  // Convert to inHg
 
   // Optional bias (tune if needed)
   // bmepres += 0.00;
@@ -623,8 +636,10 @@ void readbmp() {
   } else {
     double sensor_temperatureC = bmp.readTemperature();
     bmptemp = sensor_temperatureC * 1.8 + 32;
-    double altadj = 0.0065 * 110;
-    bmppres = bmp.readPressure() * pow((1 - (altadj / (sensor_temperatureC + altadj + 273.15))), -5.257) / 3386;
+
+
+    double altadj = 0.0065 * BMP_ALTITUDE_M;
+    bmppres = bmp.readPressure() * pow((1 - (altadj / (sensor_temperatureC + altadj + 273.15))), -5.257) / BMP_INHG_CONVERSION_FACTOR;
     bmppres = roundTemp(bmppres);
     bmptemp = roundTemp(bmptemp);
   }
@@ -684,17 +699,23 @@ inline void _jvHandleList() {
   String json = "{\"total\":" + String(totalBytes / 1024) + ",\"used\":" + String(usedBytes / 1024) + ",\"free\":" + String((totalBytes - usedBytes) / 1024) + ",\"files\":[";
 #ifdef ESP32
   File root = LittleFS.open("/"); File file = root.openNextFile();
-  while(file){ 
-    if(json.endsWith("}")) json += ","; 
+
+
+  while(file){
+    if(json.endsWith("}")) json += ",";
     String fname = String(file.name());
     if (!fname.startsWith("/")) fname = "/" + fname; // Ensure leading slash on ESP32
-    json += "{\"name\":\"" + fname + "\",\"size\":" + String((float)file.size() / 1024.0, 2) + "}"; 
-    file = root.openNextFile(); 
+
+
+    json += "{\"name\":\"" + fname + "\",\"size\":" + String((float)file.size() / 1024.0, 2) + "}";
+    file = root.openNextFile();
   }
 #else
   Dir dir = LittleFS.openDir("/");
-  while(dir.next()){ 
-    if(json.endsWith("}")) json += ","; 
+
+
+  while(dir.next()){
+    if(json.endsWith("}")) json += ",";
     String fname = dir.fileName();
     if (!fname.startsWith("/")) fname = "/" + fname; // Safety switch for older core compliance
     json += "{\"name\":\"" + fname + "\",\"size\":" + String((float)dir.fileSize() / 1024.0, 2) + "}"; 
@@ -736,26 +757,45 @@ inline void _jvHandleUpload() {
   }
 }
 
-inline void _jvHandleDelete() { 
-  if (!jvFsServer.hasArg("path")) return jvFsServer.send(400, "text/plain", "Bad Path"); 
-  String path = jvFsServer.arg("path"); 
-  if (LittleFS.exists(path)) { 
-    LittleFS.remove(path); 
-    jvFsServer.send(200, "text/plain", "Deleted"); 
-  } else { 
-    jvFsServer.send(404, "text/plain", "Not Found"); 
-  } 
-} 
 
-inline void initJvFSManager() { 
-#ifdef ESP32 
-  if (!LittleFS.begin(true)) return; 
-#else 
-  if (!LittleFS.begin()) { 
-    LittleFS.format(); 
-    LittleFS.begin(); 
-  } 
-#endif 
+
+
+
+
+
+
+
+
+
+inline void _jvHandleDelete() {
+  if (!jvFsServer.hasArg("path")) return jvFsServer.send(400, "text/plain", "Bad Path");
+  String path = jvFsServer.arg("path");
+  if (LittleFS.exists(path)) {
+    LittleFS.remove(path);
+    jvFsServer.send(200, "text/plain", "Deleted");
+  } else {
+    jvFsServer.send(404, "text/plain", "Not Found");
+  }
+}
+
+
+
+
+
+
+
+
+
+
+inline void initJvFSManager() {
+#ifdef ESP32
+  if (!LittleFS.begin(true)) return;
+#else
+  if (!LittleFS.begin()) {
+    LittleFS.format();
+    LittleFS.begin();
+  }
+#endif
   jvFsServer.on("/littlefs", HTTP_GET, _jvHandleIndex); 
   jvFsServer.on("/littlefs/list", HTTP_GET, _jvHandleList); 
   jvFsServer.on("/littlefs/view", HTTP_GET, _jvHandleView); 
@@ -780,3 +820,4 @@ inline void runJvFSManager() {}
 #endif // Ends the INCLUDE_FILE_MANAGER guard block
 
 #endif // Ends the master JVCOMMON_H file guard block
+
